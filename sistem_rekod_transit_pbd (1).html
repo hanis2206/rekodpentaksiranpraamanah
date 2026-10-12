@@ -1,0 +1,1437 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Rekod Transit PBD</title>
+    
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        tp1: '#ef4444',
+                        tp2: '#f97316',
+                        tp3: '#eab308',
+                        tp4: '#3b82f6',
+                        tp5: '#a855f7',
+                        tp6: '#10b981',
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- React 18 & Babel CDN -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #e0e7ff 0%, #f3e8ff 50%, #fce7f3 100%);
+            min-height: 100vh;
+            color: #1e293b;
+        }
+
+        /* Glassmorphism background utilities */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.65);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+        }
+
+        .glass-card {
+            background: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.05);
+        }
+
+        .glass-input {
+            background: rgba(255, 255, 255, 0.8);
+            border: 1px solid rgba(203, 213, 225, 0.8);
+            backdrop-filter: blur(4px);
+        }
+
+        .glass-input:focus {
+            background: rgba(255, 255, 255, 0.95);
+            border-color: #6366f1;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        }
+
+        /* Print friendly styles */
+        @media print {
+            body {
+                background: #ffffff !important;
+                color: #000000 !important;
+            }
+            .no-print {
+                display: none !important;
+            }
+            .print-only {
+                display: block !important;
+            }
+            .glass-panel, .glass-card {
+                background: #ffffff !important;
+                backdrop-filter: none !important;
+                box-shadow: none !important;
+                border: 1px solid #cbd5e1 !important;
+            }
+            .print-break-inside-avoid {
+                break-inside: avoid;
+            }
+            textarea {
+                border: none !important;
+                resize: none !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // Configuration for TP Levels (Tahap Penguasaan)
+        const TP_LEVELS = [
+            { level: 1, min: 0, max: 19, label: 'TP1', text: 'Sangat Terhad', color: 'bg-red-500', textColor: 'text-red-700', bgLight: 'bg-red-50', border: 'border-red-200' },
+            { level: 2, min: 20, max: 39, label: 'TP2', text: 'Terhad', color: 'bg-orange-500', textColor: 'text-orange-700', bgLight: 'bg-orange-50', border: 'border-orange-200' },
+            { level: 3, min: 40, max: 59, label: 'TP3', text: 'Memuaskan', color: 'bg-yellow-500', textColor: 'text-yellow-700', bgLight: 'bg-yellow-50', border: 'border-yellow-200' },
+            { level: 4, min: 60, max: 74, label: 'TP4', text: 'Baik', color: 'bg-blue-500', textColor: 'text-blue-700', bgLight: 'bg-blue-50', border: 'border-blue-200' },
+            { level: 5, min: 75, max: 89, label: 'TP5', text: 'Sangat Baik', color: 'bg-purple-500', textColor: 'text-purple-700', bgLight: 'bg-purple-50', border: 'border-purple-200' },
+            { level: 6, min: 90, max: 100, label: 'TP6', text: 'Cemerlang', color: 'bg-emerald-500', textColor: 'text-emerald-700', bgLight: 'bg-emerald-50', border: 'border-emerald-200' },
+        ];
+
+        // Utility to map score (0-100) to TP details
+        const getTPInfo = (score) => {
+            const val = parseFloat(score);
+            if (isNaN(val) || val < 0) return TP_LEVELS[0];
+            const found = TP_LEVELS.find(tp => val >= tp.min && val <= tp.max);
+            return found || (val > 100 ? TP_LEVELS[5] : TP_LEVELS[0]);
+        };
+
+        // Custom SVG Icons Component to prevent CDN dependency failure
+        const Icon = ({ name, className = "w-5 h-5" }) => {
+            const icons = {
+                dashboard: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />,
+                table: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />,
+                report: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />,
+                settings: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />,
+                plus: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />,
+                trash: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />,
+                save: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />,
+                print: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />,
+                user: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />,
+                alert: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />,
+                check: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />,
+                download: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />,
+                upload: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />,
+                school: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5m0 0v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />,
+                search: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            };
+
+            return (
+                <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    {icons[name] || icons.dashboard}
+                </svg>
+            );
+        };
+
+        const INITIAL_SCHOOL_INFO = {
+            schoolName: "SEKOLAH KEBANGSAAN SERI MURNI",
+            subject: "Bidang Pembelajaran: Kognitif",
+            className: "Prasekolah",
+            logo: ""
+        };
+
+        const INITIAL_TOPICS = [
+            { id: "top_1", code: "KF 1.1.1", title: "Memadan dan membandingkan objek" },
+            { id: "top_2", code: "KF 1.1.2", title: "Mengenal nombor" },
+            { id: "top_3", code: "KF 1.1.3", title: "Memahami nombor dalam persekitaran" },
+            { id: "top_4", code: "KF 1.1.4", title: "Mengetahui kedudukan objek dalam ruang" },
+            { id: "top_5", code: "KF 1.1.5", title: "Mengecam dan menamakan bentuk objek" }
+        ];
+
+        const INITIAL_STUDENTS = [
+            {
+                id: "std_1",
+                name: "AQIL NAFIL A/L ASON",
+                scores: {
+                    top_1: 82,
+                    top_2: 78,
+                    top_3: 85,
+                    top_4: 90,
+                    top_5: 88
+                },
+                teacherComment: "",
+                followUp: ""
+            },
+            {
+                id: "std_2",
+                name: "Rendy Nazzuandy",
+                scores: {
+                    top_1: 35,
+                    top_2: 28,
+                    top_3: 42,
+                    top_4: 30,
+                    top_5: 38
+                },
+                teacherComment: "",
+                followUp: ""
+            }
+        ];
+
+        function App() {
+            // LocalStorage State Management
+            const [schoolInfo, setSchoolInfo] = useState(() => {
+                const saved = localStorage.getItem('pbd_school_info');
+                return saved ? JSON.parse(saved) : INITIAL_SCHOOL_INFO;
+            });
+
+            const [topics, setTopics] = useState(() => {
+                const saved = localStorage.getItem('pbd_topics');
+                return saved ? JSON.parse(saved) : INITIAL_TOPICS;
+            });
+
+            const [students, setStudents] = useState(() => {
+                const saved = localStorage.getItem('pbd_students');
+                return saved ? JSON.parse(saved) : INITIAL_STUDENTS;
+            });
+
+            const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'transit', 'report', 'settings'
+            const [selectedStudentId, setSelectedStudentId] = useState(students[0]?.id || '');
+            const [toastMessage, setToastMessage] = useState(null);
+
+            // Toast helper
+            const showToast = (msg, type = "success") => {
+                setToastMessage({ msg, type });
+                setTimeout(() => setToastMessage(null), 3000);
+            };
+
+            // Sync state to local storage automatically
+            useEffect(() => {
+                localStorage.setItem('pbd_school_info', JSON.stringify(schoolInfo));
+            }, [schoolInfo]);
+
+            useEffect(() => {
+                localStorage.setItem('pbd_topics', JSON.stringify(topics));
+            }, [topics]);
+
+            useEffect(() => {
+                localStorage.setItem('pbd_students', JSON.stringify(students));
+            }, [students]);
+
+            // Keep selected student updated if list changes
+            useEffect(() => {
+                if (students.length > 0 && !students.some(s => s.id === selectedStudentId)) {
+                    setSelectedStudentId(students[0].id);
+                }
+            }, [students]);
+
+            return (
+                <div className="min-h-screen pb-12">
+                    {/* Floating Toast Notification */}
+                    {toastMessage && (
+                        <div className="fixed top-5 right-5 z-50 flex items-center gap-3 px-5 py-3 rounded-xl shadow-2xl glass-panel text-slate-800 border-l-4 border-indigo-500 animate-bounce">
+                            <Icon name={toastMessage.type === 'error' ? 'alert' : 'check'} className={`w-6 h-6 ${toastMessage.type === 'error' ? 'text-red-500' : 'text-emerald-500'}`} />
+                            <span className="font-semibold text-sm">{toastMessage.msg}</span>
+                        </div>
+                    )}
+
+                    {/* Navigation Bar */}
+                    <header className="sticky top-0 z-40 glass-panel border-b border-white/30 mb-8 no-print">
+                        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col md:flex-row items-center justify-between gap-4">
+                            <div className="flex items-center gap-3">
+                                {schoolInfo.logo ? (
+                                    <img src={schoolInfo.logo} alt="Logo" className="w-10 h-10 object-contain rounded-lg bg-white/50 p-1 shadow" />
+                                ) : (
+                                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-md">
+                                        <Icon name="school" className="w-6 h-6" />
+                                    </div>
+                                )}
+                                <div>
+                                    <h1 className="text-xl font-extrabold tracking-tight text-slate-800">{schoolInfo.schoolName}</h1>
+                                    <p className="text-xs font-medium text-slate-500">{schoolInfo.subject} • {schoolInfo.className}</p>
+                                </div>
+                            </div>
+
+                            {/* Tab Switcher */}
+                            <nav className="flex p-1.5 space-x-1 bg-white/40 rounded-xl backdrop-blur-md border border-white/40 shadow-inner">
+                                {[
+                                    { id: 'dashboard', label: 'Dashboard & Analisis', icon: 'dashboard' },
+                                    { id: 'transit', label: 'Rekod Transit', icon: 'table' },
+                                    { id: 'report', label: 'Laporan Individu', icon: 'report' },
+                                    { id: 'settings', label: 'Tetapan', icon: 'settings' }
+                                ].map((tab) => (
+                                    <button
+                                        key={tab.id}
+                                        onClick={() => setActiveTab(tab.id)}
+                                        className={`flex items-center gap-2 px-4 py-2 text-xs md:text-sm font-semibold rounded-lg transition-all duration-200 ${
+                                            activeTab === tab.id
+                                                ? 'bg-white text-indigo-600 shadow-md transform scale-[1.02]'
+                                                : 'text-slate-600 hover:text-indigo-600 hover:bg-white/30'
+                                        }`}
+                                    >
+                                        <Icon name={tab.icon} className="w-4 h-4" />
+                                        <span>{tab.label}</span>
+                                    </button>
+                                ))}
+                            </nav>
+                        </div>
+                    </header>
+
+                    {/* Main Container */}
+                    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                        {activeTab === 'dashboard' && <DashboardTab students={students} topics={topics} showToast={showToast} setActiveTab={setActiveTab} setSelectedStudentId={setSelectedStudentId} />}
+                        {activeTab === 'transit' && <TransitTab students={students} setStudents={setStudents} topics={topics} showToast={showToast} />}
+                        {activeTab === 'report' && <ReportTab students={students} setStudents={setStudents} topics={topics} schoolInfo={schoolInfo} selectedStudentId={selectedStudentId} setSelectedStudentId={setSelectedStudentId} showToast={showToast} />}
+                        {activeTab === 'settings' && <SettingsTab schoolInfo={schoolInfo} setSchoolInfo={setSchoolInfo} topics={topics} setTopics={setTopics} students={students} setStudents={setStudents} showToast={showToast} />}
+                    </main>
+                </div>
+            );
+        }
+
+        function DashboardTab({ students, topics, showToast, setActiveTab, setSelectedStudentId }) {
+            const chartRef = useRef(null);
+            const chartInstance = useRef(null);
+
+            // Compute statistics
+            const stats = useMemo(() => {
+                if (!students.length) return { total: 0, classAvgScore: 0, classAvgTP: 'TP1', tpCounts: [0, 0, 0, 0, 0, 0] };
+
+                let totalScoreSum = 0;
+                let totalTopicCount = 0;
+                const tpCounts = [0, 0, 0, 0, 0, 0]; // TP1 to TP6
+
+                students.forEach(student => {
+                    let studentSum = 0;
+                    let studentTopics = 0;
+
+                    topics.forEach(t => {
+                        const score = student.scores[t.id];
+                        if (score !== undefined && score !== '') {
+                            studentSum += parseFloat(score) || 0;
+                            studentTopics++;
+                        }
+                    });
+
+                    const studentAvg = studentTopics > 0 ? studentSum / studentTopics : 0;
+                    const tpInfo = getTPInfo(studentAvg);
+                    tpCounts[tpInfo.level - 1]++;
+
+                    totalScoreSum += studentAvg;
+                    totalTopicCount++;
+                });
+
+                const classAvgScore = totalTopicCount > 0 ? (totalScoreSum / students.length).toFixed(1) : 0;
+                const classAvgTP = getTPInfo(classAvgScore);
+
+                return {
+                    total: students.length,
+                    classAvgScore,
+                    classAvgTP,
+                    tpCounts
+                };
+            }, [students, topics]);
+
+            // Chart.js Bar Chart setup
+            useEffect(() => {
+                if (!chartRef.current) return;
+
+                if (chartInstance.current) {
+                    chartInstance.current.destroy();
+                }
+
+                const ctx = chartRef.current.getContext('2d');
+                chartInstance.current = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: ['TP1 (0-19)', 'TP2 (20-39)', 'TP3 (40-59)', 'TP4 (60-74)', 'TP5 (75-89)', 'TP6 (90-100)'],
+                        datasets: [{
+                            label: 'Bilangan Pelajar',
+                            data: stats.tpCounts,
+                            backgroundColor: [
+                                'rgba(239, 68, 68, 0.85)',
+                                'rgba(249, 115, 22, 0.85)',
+                                'rgba(234, 179, 8, 0.85)',
+                                'rgba(59, 130, 246, 0.85)',
+                                'rgba(168, 85, 247, 0.85)',
+                                'rgba(16, 185, 129, 0.85)'
+                            ],
+                            borderColor: [
+                                '#ef4444', '#f97316', '#eab308', '#3b82f6', '#a855f7', '#10b981'
+                            ],
+                            borderWidth: 1.5,
+                            borderRadius: 8,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return ` Jumlah: ${context.parsed.y} Pelajar`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: { stepSize: 1, precision: 0 }
+                            }
+                        }
+                    }
+                });
+
+                return () => {
+                    if (chartInstance.current) {
+                        chartInstance.current.destroy();
+                    }
+                };
+            }, [stats]);
+
+            // Filter students for Intervention & Enrichment
+            const { interventionList, enrichmentList } = useMemo(() => {
+                const inter = [];
+                const enrich = [];
+
+                students.forEach(s => {
+                    let sum = 0, count = 0;
+                    topics.forEach(t => {
+                        if (s.scores[t.id] !== undefined && s.scores[t.id] !== '') {
+                            sum += parseFloat(s.scores[t.id]);
+                            count++;
+                        }
+                    });
+                    const avg = count > 0 ? sum / count : 0;
+                    const tpInfo = getTPInfo(avg);
+
+                    if (tpInfo.level <= 2) {
+                        inter.push({ ...s, avg: avg.toFixed(1), tpInfo });
+                    } else if (tpInfo.level >= 5) {
+                        enrich.push({ ...s, avg: avg.toFixed(1), tpInfo });
+                    }
+                });
+
+                return { interventionList: inter, enrichmentList: enrich };
+            }, [students, topics]);
+
+            return (
+                <div className="space-y-8 animate-fade-in">
+                    {/* Summary KPI Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="glass-card p-6 rounded-2xl flex items-center justify-between border-l-4 border-indigo-500">
+                            <div>
+                                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Jumlah Pelajar</p>
+                                <h3 className="text-3xl font-extrabold text-slate-800 mt-1">{stats.total} Orang</h3>
+                                <p className="text-xs text-slate-500 mt-1">Berdaftar dalam kelas</p>
+                            </div>
+                            <div className="w-12 h-12 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center">
+                                <Icon name="user" className="w-7 h-7" />
+                            </div>
+                        </div>
+
+                        <div className="glass-card p-6 rounded-2xl flex items-center justify-between border-l-4 border-blue-500">
+                            <div>
+                                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Purata Markah Kelas</p>
+                                <h3 className="text-3xl font-extrabold text-slate-800 mt-1">{stats.classAvgScore} %</h3>
+                                <p className="text-xs text-slate-500 mt-1">Keseluruhan topik DSKP</p>
+                            </div>
+                            <div className="w-12 h-12 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center">
+                                <Icon name="dashboard" className="w-7 h-7" />
+                            </div>
+                        </div>
+
+                        <div className="glass-card p-6 rounded-2xl flex items-center justify-between border-l-4 border-purple-500">
+                            <div>
+                                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Purata TP Kelas</p>
+                                <div className="flex items-center gap-2 mt-1">
+                                    <span className={`px-3 py-1 text-sm font-bold rounded-lg text-white ${stats.classAvgTP.color}`}>
+                                        {stats.classAvgTP.label}
+                                    </span>
+                                    <span className="text-base font-semibold text-slate-700">({stats.classAvgTP.text})</span>
+                                </div>
+                                <p className="text-xs text-slate-500 mt-1">Tahap Penguasaan Umum</p>
+                            </div>
+                            <div className="w-12 h-12 rounded-2xl bg-purple-100 text-purple-600 flex items-center justify-center">
+                                <Icon name="report" className="w-7 h-7" />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Chart Section */}
+                    <div className="glass-card p-6 rounded-2xl">
+                        <div className="flex items-center justify-between mb-4">
+                            <div>
+                                <h3 className="text-lg font-bold text-slate-800">Taburan Pelajar Mengikut Tahap Penguasaan (TP1 - TP6)</h3>
+                                <p className="text-xs text-slate-500">Analisis visual pencapaian murid dalam kelas</p>
+                            </div>
+                        </div>
+                        <div className="h-72 w-full">
+                            <canvas ref={chartRef}></canvas>
+                        </div>
+                    </div>
+
+                    {/* Action Cards Grid: Intervensi & Pengayaan */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Intervention Card */}
+                        <div className="glass-card p-6 rounded-2xl border-t-4 border-red-500">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-8 h-8 rounded-lg bg-red-100 text-red-600 flex items-center justify-center">
+                                        <Icon name="alert" className="w-5 h-5" />
+                                    </div>
+                                    <h3 className="text-base font-bold text-slate-800">Pelajar Perlu Intervensi (TP1 - TP2)</h3>
+                                </div>
+                                <span className="px-2.5 py-0.5 text-xs font-bold rounded-full bg-red-100 text-red-700">
+                                    {interventionList.length} Murid
+                                </span>
+                            </div>
+
+                            {interventionList.length === 0 ? (
+                                <p className="text-sm text-slate-500 py-6 text-center italic">Tiada murid dikesan berada di tahap TP1 atau TP2. Syabas!</p>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="divide-y divide-slate-100 max-h-48 overflow-y-auto pr-2">
+                                        {interventionList.map(std => (
+                                            <div key={std.id} className="py-2.5 flex items-center justify-between">
+                                                <div>
+                                                    <p className="text-sm font-semibold text-slate-800">{std.name}</p>
+                                                    <p className="text-xs text-slate-500">Purata: {std.avg}%</p>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className={`px-2 py-0.5 text-xs font-bold rounded text-white ${std.tpInfo.color}`}>
+                                                        {std.tpInfo.label}
+                                                    </span>
+                                                    <button 
+                                                        onClick={() => { setSelectedStudentId(std.id); setActiveTab('report'); }}
+                                                        className="text-xs text-indigo-600 hover:underline font-medium"
+                                                    >
+                                                        Lihat Laporan
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {/* Action Suggestions */}
+                                    <div className="p-3 bg-red-50/70 border border-red-100 rounded-xl text-xs text-red-800 space-y-1.5">
+                                        <p className="font-bold flex items-center gap-1">
+                                            <Icon name="check" className="w-4 h-4 text-red-600" /> Cadangan Tindakan Susulan Intervensi:
+                                        </p>
+                                        <ul className="list-disc list-inside space-y-1 pl-1 text-slate-700">
+                                            <li>Latihan asas secara 1-to-1 mengguna bahan konkrit (BBM visual).</li>
+                                            <li>Program Bimbingan Rakan Sebaya (Peer Tutoring).</li>
+                                            <li>Ujian formatif ulangan fokus pada konstruk asas yang belum dikuasai.</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Enrichment Card */}
+                        <div className="glass-card p-6 rounded-2xl border-t-4 border-emerald-500">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center">
+                                        <Icon name="check" className="w-5 h-5" />
+                                    </div>
+                                    <h3 className="text-base font-bold text-slate-800">Pelajar Cemerlang (TP5 - TP6)</h3>
+                                </div>
+                                <span className="px-2.5 py-0.5 text-xs font-bold rounded-full bg-emerald-100 text-emerald-700">
+                                    {enrichmentList.length} Murid
+                                </span>
+                            </div>
+
+                            {enrichmentList.length === 0 ? (
+                                <p className="text-sm text-slate-500 py-6 text-center italic">Tiada murid berada di tahap TP5 atau TP6 lagi.</p>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="divide-y divide-slate-100 max-h-48 overflow-y-auto pr-2">
+                                        {enrichmentList.map(std => (
+                                            <div key={std.id} className="py-2.5 flex items-center justify-between">
+                                                <div>
+                                                    <p className="text-sm font-semibold text-slate-800">{std.name}</p>
+                                                    <p className="text-xs text-slate-500">Purata: {std.avg}%</p>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className={`px-2 py-0.5 text-xs font-bold rounded text-white ${std.tpInfo.color}`}>
+                                                        {std.tpInfo.label}
+                                                    </span>
+                                                    <button 
+                                                        onClick={() => { setSelectedStudentId(std.id); setActiveTab('report'); }}
+                                                        className="text-xs text-indigo-600 hover:underline font-medium"
+                                                    >
+                                                        Lihat Laporan
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {/* Action Suggestions */}
+                                    <div className="p-3 bg-emerald-50/70 border border-emerald-100 rounded-xl text-xs text-emerald-800 space-y-1.5">
+                                        <p className="font-bold flex items-center gap-1">
+                                            <Icon name="check" className="w-4 h-4 text-emerald-600" /> Cadangan Tindakan Pengayaan:
+                                        </p>
+                                        <ul className="list-disc list-inside space-y-1 pl-1 text-slate-700">
+                                            <li>Diberi soalan penaakulan aras tinggi (KBAT) dan penyelesaian masalah.</li>
+                                            <li>Dilantik sebagai mentor / 'Guru Muda' untuk membimbing rakan-rakan.</li>
+                                            <li>Projek pengukuhan kreatif secara berkumpulan.</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function TransitTab({ students, setStudents, topics, showToast }) {
+            const [searchTerm, setSearchTerm] = useState("");
+            const [newStudentName, setNewStudentName] = useState("");
+            const [showAddModal, setShowAddModal] = useState(false);
+
+            // Update student score dynamically
+            const handleScoreChange = (studentId, topicId, value) => {
+                let numValue = value === "" ? "" : Math.min(100, Math.max(0, parseFloat(value) || 0));
+
+                setStudents(prev => prev.map(student => {
+                    if (student.id === studentId) {
+                        return {
+                            ...student,
+                            scores: {
+                                ...student.scores,
+                                [topicId]: numValue
+                            }
+                        };
+                    }
+                    return student;
+                }));
+            };
+
+            // Add student
+            const handleAddStudent = (e) => {
+                e.preventDefault();
+                if (!newStudentName.trim()) return;
+
+                const initialScores = {};
+                topics.forEach(t => initialScores[t.id] = 0);
+
+                const newStudent = {
+                    id: "std_" + Date.now(),
+                    name: newStudentName.trim().toUpperCase(),
+                    scores: initialScores,
+                    teacherComment: "",
+                    followUp: ""
+                };
+
+                setStudents(prev => [...prev, newStudent]);
+                setNewStudentName("");
+                setShowAddModal(false);
+                showToast("Pelajar berjaya ditambah!");
+            };
+
+            // Delete student
+            const handleDeleteStudent = (studentId, studentName) => {
+                if (window.confirm(`Adakah anda pasti mahu memadamkan rekod bagi ${studentName}?`)) {
+                    setStudents(prev => prev.filter(s => s.id !== studentId));
+                    showToast("Rekod pelajar telah dipadam.");
+                }
+            };
+
+            // Filtered students by search
+            const filteredStudents = students.filter(s => 
+                s.name.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+
+            return (
+                <div className="space-y-6 animate-fade-in">
+                    {/* Controls Bar */}
+                    <div className="glass-card p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4">
+                        <div className="relative w-full md:w-80">
+                            <Icon name="search" className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" />
+                            <input
+                                type="text"
+                                placeholder="Cari nama pelajar..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="w-full pl-10 pr-4 py-2 text-sm rounded-xl glass-input text-slate-800 placeholder-slate-400"
+                            />
+                        </div>
+
+                        <div className="flex items-center gap-3 w-full md:w-auto justify-end">
+                            <button
+                                onClick={() => setShowAddModal(true)}
+                                className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md transition-all transform active:scale-95"
+                            >
+                                <Icon name="plus" className="w-4 h-4" />
+                                <span>Tambah Pelajar</span>
+                            </button>
+
+                            <button
+                                onClick={() => showToast("Semua data tersimpan secara automatik!")}
+                                className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 rounded-xl transition-all shadow-sm"
+                            >
+                                <Icon name="save" className="w-4 h-4" />
+                                <span>Simpan Data</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Transit Matrix Table */}
+                    <div className="glass-card rounded-2xl overflow-hidden shadow-lg border border-white/50">
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse">
+                                <thead>
+                                    <tr className="bg-slate-800/90 backdrop-blur-md text-white text-xs uppercase tracking-wider">
+                                        <th className="py-4 px-4 font-bold text-center w-12 border-b border-slate-700">Bil</th>
+                                        <th className="py-4 px-4 font-bold border-b border-slate-700 min-w-[200px]">Nama Pelajar</th>
+                                        {topics.map((t, idx) => (
+                                            <th key={t.id} className="py-3 px-3 border-b border-slate-700 text-center min-w-[130px]">
+                                                <div className="font-bold text-indigo-300">{t.code}</div>
+                                                <div className="text-[10px] font-normal text-slate-300 truncate max-w-[120px]" title={t.title}>
+                                                    {t.title}
+                                                </div>
+                                            </th>
+                                        ))}
+                                        <th className="py-4 px-4 font-bold text-center border-b border-slate-700 min-w-[100px]">Purata Markah</th>
+                                        <th className="py-4 px-4 font-bold text-center border-b border-slate-700 min-w-[100px]">Tahap (TP)</th>
+                                        <th className="py-4 px-4 font-bold text-center border-b border-slate-700 w-16">Tindakan</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-200/60 text-sm">
+                                    {filteredStudents.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={topics.length + 5} className="py-12 text-center text-slate-500 italic">
+                                                Tiada rekod pelajar ditemui. Sila tambah pelajar baharu.
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        filteredStudents.map((std, index) => {
+                                            // Compute average & overall TP
+                                            let scoreSum = 0;
+                                            let count = 0;
+                                            topics.forEach(t => {
+                                                const sc = std.scores[t.id];
+                                                if (sc !== undefined && sc !== '') {
+                                                    scoreSum += parseFloat(sc) || 0;
+                                                    count++;
+                                                }
+                                            });
+
+                                            const avg = count > 0 ? (scoreSum / count).toFixed(1) : 0;
+                                            const overallTP = getTPInfo(avg);
+
+                                            return (
+                                                <tr key={std.id} className="hover:bg-white/60 transition-colors">
+                                                    <td className="py-3 px-4 text-center font-semibold text-slate-500">{index + 1}</td>
+                                                    <td className="py-3 px-4 font-bold text-slate-800">{std.name}</td>
+                                                    {topics.map(t => {
+                                                        const currentScore = std.scores[t.id] ?? '';
+                                                        const topicTP = getTPInfo(currentScore);
+
+                                                        return (
+                                                            <td key={t.id} className="py-2 px-2 text-center">
+                                                                <div className="flex flex-col items-center gap-1">
+                                                                    <input
+                                                                        type="number"
+                                                                        min="0"
+                                                                        max="100"
+                                                                        value={currentScore}
+                                                                        onChange={(e) => handleScoreChange(std.id, t.id, e.target.value)}
+                                                                        className="w-16 text-center font-bold text-sm py-1.5 px-1 rounded-lg glass-input text-slate-800 border focus:border-indigo-500"
+                                                                        placeholder="0-100"
+                                                                    />
+                                                                    {currentScore !== '' && (
+                                                                        <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded text-white ${topicTP.color}`}>
+                                                                            {topicTP.label}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </td>
+                                                        );
+                                                    })}
+                                                    <td className="py-3 px-4 text-center font-extrabold text-slate-700 bg-slate-50/50">
+                                                        {avg} %
+                                                    </td>
+                                                    <td className="py-3 px-4 text-center bg-slate-50/50">
+                                                        <span className={`inline-block px-3 py-1 text-xs font-black rounded-full text-white shadow-sm ${overallTP.color}`}>
+                                                            {overallTP.label}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-3 px-4 text-center">
+                                                        <button
+                                                            onClick={() => handleDeleteStudent(std.id, std.name)}
+                                                            className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors"
+                                                            title="Padam Pelajar"
+                                                        >
+                                                            <Icon name="trash" className="w-4 h-4" />
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* Add Student Modal */}
+                    {showAddModal && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-fade-in">
+                            <div className="glass-panel max-w-md w-full p-6 rounded-2xl shadow-2xl bg-white/90 border border-white">
+                                <h3 className="text-lg font-bold text-slate-800 mb-4">Tambah Pelajar Baharu</h3>
+                                <form onSubmit={handleAddStudent} className="space-y-4">
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Nama Penuh Pelajar</label>
+                                        <input
+                                            type="text"
+                                            required
+                                            value={newStudentName}
+                                            onChange={(e) => setNewStudentName(e.target.value)}
+                                            placeholder="Contoh: AHMAD RAYYAN B. ZULKIFLI"
+                                            className="w-full px-4 py-2.5 text-sm rounded-xl glass-input text-slate-800 font-semibold"
+                                            autoFocus
+                                        />
+                                    </div>
+                                    <div className="flex items-center justify-end gap-3 pt-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowAddModal(false)}
+                                            className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+                                        >
+                                            Batal
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md"
+                                        >
+                                            Tambah Pelajar
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function ReportTab({ students, setStudents, topics, schoolInfo, selectedStudentId, setSelectedStudentId, showToast }) {
+            const radarRef = useRef(null);
+            const radarInstance = useRef(null);
+
+            const selectedStudent = useMemo(() => {
+                return students.find(s => s.id === selectedStudentId) || students[0];
+            }, [students, selectedStudentId]);
+
+            // Calculate student scores list & averages
+            const studentData = useMemo(() => {
+                if (!selectedStudent) return { topicScores: [], avgScore: 0, overallTP: TP_LEVELS[0] };
+
+                let sum = 0;
+                let count = 0;
+
+                const topicScores = topics.map(t => {
+                    const sc = selectedStudent.scores[t.id];
+                    const numVal = sc !== undefined && sc !== '' ? parseFloat(sc) : 0;
+                    sum += numVal;
+                    count++;
+                    return {
+                        ...t,
+                        score: numVal,
+                        tp: getTPInfo(numVal)
+                    };
+                });
+
+                const avgScore = count > 0 ? (sum / count).toFixed(1) : 0;
+                const overallTP = getTPInfo(avgScore);
+
+                return { topicScores, avgScore, overallTP };
+            }, [selectedStudent, topics]);
+
+            // Default suggested feedback based on overall TP
+            const defaultFeedback = useMemo(() => {
+                const tp = studentData.overallTP.level;
+                if (tp <= 2) {
+                    return {
+                        comment: "Pelajar memerlukan lebih banyak dorongan dan bimbingan asas untuk memahami konsep tajuk yang dipelajari.",
+                        followUp: "Latihan intervensi khas secara berkala dan bimbingan rakan sebaya."
+                    };
+                } else if (tp <= 4) {
+                    return {
+                        comment: "Pelajar menunjukkan kefahaman yang baik dan berupaya menyelesaikan tugasan dengan panduan terpandu.",
+                        followUp: "Latihan pengukuhan tambahan untuk tingkatkan konsistensi dan pemahaman mendalam."
+                    };
+                } else {
+                    return {
+                        comment: "Pelajar menguasai topik dengan amat cemerlang dan berkebolehan memimpin rakan lain.",
+                        followUp: "Aktiviti pengayaan bertaraf KBAT dan peranan mentor murid."
+                    };
+                }
+            }, [studentData.overallTP]);
+
+            // Local state for teacher comment & followUp
+            const [comment, setComment] = useState("");
+            const [followUp, setFollowUp] = useState("");
+
+            useEffect(() => {
+                if (selectedStudent) {
+                    setComment(selectedStudent.teacherComment || defaultFeedback.comment);
+                    setFollowUp(selectedStudent.followUp || defaultFeedback.followUp);
+                }
+            }, [selectedStudent, defaultFeedback]);
+
+            // Save teacher notes to student record
+            const handleSaveNotes = () => {
+                if (!selectedStudent) return;
+
+                setStudents(prev => prev.map(s => {
+                    if (s.id === selectedStudent.id) {
+                        return {
+                            ...s,
+                            teacherComment: comment,
+                            followUp: followUp
+                        };
+                    }
+                    return s;
+                }));
+                showToast("Ulasan guru telah disimpan!");
+            };
+
+            // Render Chart.js Radar Chart for student performance
+            useEffect(() => {
+                if (!radarRef.current || !selectedStudent) return;
+
+                if (radarInstance.current) {
+                    radarInstance.current.destroy();
+                }
+
+                const ctx = radarRef.current.getContext('2d');
+                const labels = studentData.topicScores.map(t => t.code);
+                const dataValues = studentData.topicScores.map(t => t.score);
+
+                radarInstance.current = new Chart(ctx, {
+                    type: 'radar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Markah Topik (%)',
+                            data: dataValues,
+                            backgroundColor: 'rgba(99, 102, 241, 0.2)',
+                            borderColor: '#6366f1',
+                            pointBackgroundColor: '#4f46e5',
+                            pointBorderColor: '#fff',
+                            pointHoverBackgroundColor: '#fff',
+                            pointHoverBorderColor: '#4f46e5',
+                            borderWidth: 2,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            r: {
+                                min: 0,
+                                max: 100,
+                                ticks: { stepSize: 20, display: false },
+                                pointLabels: { font: { size: 11, weight: 'bold' } }
+                            }
+                        },
+                        plugins: {
+                            legend: { display: false }
+                        }
+                    }
+                });
+
+                return () => {
+                    if (radarInstance.current) {
+                        radarInstance.current.destroy();
+                    }
+                };
+            }, [selectedStudent, studentData]);
+
+            if (!selectedStudent) {
+                return <div className="p-12 text-center text-slate-500">Sila tambah sekurang-kurangnya seorang pelajar terlebih dahulu.</div>;
+            }
+
+            return (
+                <div className="space-y-6 animate-fade-in">
+                    {/* Top Selector & Action Bar */}
+                    <div className="glass-card p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4 no-print">
+                        <div className="flex items-center gap-3 w-full md:w-auto">
+                            <label className="text-xs font-bold text-slate-600 uppercase whitespace-nowrap">Pilih Pelajar:</label>
+                            <select
+                                value={selectedStudent.id}
+                                onChange={(e) => setSelectedStudentId(e.target.value)}
+                                className="w-full md:w-72 px-4 py-2 text-sm font-bold rounded-xl glass-input text-slate-800"
+                            >
+                                {students.map(s => (
+                                    <option key={s.id} value={s.id}>{s.name}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={handleSaveNotes}
+                                className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-indigo-700 bg-indigo-100 hover:bg-indigo-200 border border-indigo-300 rounded-xl transition-all shadow-sm"
+                            >
+                                <Icon name="save" className="w-4 h-4" />
+                                <span>Simpan Ulasan</span>
+                            </button>
+
+                            <button
+                                onClick={() => window.print()}
+                                className="flex items-center gap-2 px-5 py-2 text-xs font-bold text-white bg-slate-800 hover:bg-slate-900 rounded-xl shadow-md transition-all transform active:scale-95"
+                            >
+                                <Icon name="print" className="w-4 h-4" />
+                                <span>Cetak / Eksport PDF</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Printable Report Document Card */}
+                    <div className="glass-card p-8 rounded-2xl border border-white/60 bg-white/80 shadow-2xl space-y-8" id="printable-area">
+                        {/* Report Header */}
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-6">
+                            <div className="flex items-center gap-4">
+                                {schoolInfo.logo ? (
+                                    <img src={schoolInfo.logo} alt="Logo Sekolah" className="w-16 h-16 object-contain rounded-xl" />
+                                ) : (
+                                    <div className="w-16 h-16 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-bold text-2xl shadow-md">
+                                        <Icon name="school" className="w-10 h-10" />
+                                    </div>
+                                )}
+                                <div>
+                                    <h2 className="text-xl font-black text-slate-900 tracking-tight uppercase">{schoolInfo.schoolName}</h2>
+                                    <p className="text-sm font-bold text-indigo-600 mt-0.5">LAPORAN TRANSIT PENTAKSIRAN BILIK DARJAH (PBD)</p>
+                                    <p className="text-xs text-slate-500 font-medium">{schoolInfo.subject} • {schoolInfo.className}</p>
+                                </div>
+                            </div>
+
+                            <div className="text-right">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Tahap Penguasaan Keseluruhan</span>
+                                <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-2xl text-white font-black text-lg shadow-md ${studentData.overallTP.color}`}>
+                                    <span>{studentData.overallTP.label}</span>
+                                    <span className="text-xs font-semibold opacity-90">({studentData.overallTP.text})</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Student Details Grid */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-slate-50/80 rounded-xl border border-slate-200 text-xs">
+                            <div>
+                                <span className="text-slate-400 uppercase font-bold block text-[10px]">Nama Pelajar</span>
+                                <span className="font-extrabold text-slate-800 text-sm">{selectedStudent.name}</span>
+                            </div>
+                            <div>
+                                <span className="text-slate-400 uppercase font-bold block text-[10px]">Kelas</span>
+                                <span className="font-bold text-slate-800 text-sm">{schoolInfo.className}</span>
+                            </div>
+                            <div>
+                                <span className="text-slate-400 uppercase font-bold block text-[10px]">Purata Markah</span>
+                                <span className="font-bold text-indigo-600 text-sm">{studentData.avgScore} %</span>
+                            </div>
+                            <div>
+                                <span className="text-slate-400 uppercase font-bold block text-[10px]">Tarikh Cetakan</span>
+                                <span className="font-bold text-slate-800 text-sm">{new Date().toLocaleDateString('ms-MY')}</span>
+                            </div>
+                        </div>
+
+                        {/* Topics Breakdown Table & Radar Chart */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="lg:col-span-2 overflow-x-auto">
+                                <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2">
+                                    <Icon name="table" className="w-4 h-4 text-indigo-600" /> Prestrasi Mengikut Topik DSKP
+                                </h3>
+                                <table className="w-full text-left border-collapse text-xs">
+                                    <thead>
+                                        <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 uppercase font-bold">
+                                            <th className="py-2.5 px-3">Kod & Topik</th>
+                                            <th className="py-2.5 px-3 text-center w-20">Markah</th>
+                                            <th className="py-2.5 px-3 text-center w-24">Tahap (TP)</th>
+                                            <th className="py-2.5 px-3">Tafsiran</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-200">
+                                        {studentData.topicScores.map(t => (
+                                            <tr key={t.id} className="hover:bg-slate-50">
+                                                <td className="py-2.5 px-3">
+                                                    <span className="font-bold text-slate-800 block">{t.code}</span>
+                                                    <span className="text-slate-500 text-[11px]">{t.title}</span>
+                                                </td>
+                                                <td className="py-2.5 px-3 text-center font-extrabold text-slate-700">{t.score}</td>
+                                                <td className="py-2.5 px-3 text-center">
+                                                    <span className={`px-2 py-0.5 font-extrabold rounded text-white text-[10px] ${t.tp.color}`}>
+                                                        {t.tp.label}
+                                                    </span>
+                                                </td>
+                                                <td className="py-2.5 px-3 text-slate-600 font-medium">{t.tp.text}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {/* Radar Chart Container */}
+                            <div className="flex flex-col items-center justify-center p-4 bg-slate-50/50 rounded-2xl border border-slate-200">
+                                <h3 className="text-xs font-bold text-slate-700 mb-2">Carta Radar Perkembangan</h3>
+                                <div className="h-56 w-full flex items-center justify-center">
+                                    <canvas ref={radarRef}></canvas>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Teacher Comments & Action Plan */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-slate-200 print-break-inside-avoid">
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-bold text-slate-700 uppercase block">Ulasan Guru Subjek</label>
+                                <textarea
+                                    rows="3"
+                                    value={comment}
+                                    onChange={(e) => setComment(e.target.value)}
+                                    placeholder="Masukkan ulasan guru di sini..."
+                                    className="w-full p-3 text-xs rounded-xl glass-input text-slate-800 border focus:border-indigo-500 font-medium leading-relaxed"
+                                ></textarea>
+                            </div>
+
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-bold text-slate-700 uppercase block">Cadangan / Tindakan Susulan</label>
+                                <textarea
+                                    rows="3"
+                                    value={followUp}
+                                    onChange={(e) => setFollowUp(e.target.value)}
+                                    placeholder="Masukkan cadangan tindakan di sini..."
+                                    className="w-full p-3 text-xs rounded-xl glass-input text-slate-800 border focus:border-indigo-500 font-medium leading-relaxed"
+                                ></textarea>
+                            </div>
+                        </div>
+
+                        {/* Signature Section for Official Export */}
+                        <div className="grid grid-cols-2 gap-12 pt-12 text-xs border-t border-slate-200 print-break-inside-avoid">
+                            <div className="text-center space-y-12">
+                                <div className="border-b border-dashed border-slate-400 w-48 mx-auto"></div>
+                                <div>
+                                    <p className="font-bold text-slate-800">Tandatangan Guru Subjek</p>
+                                    <p className="text-slate-400 text-[10px]">Nama: _______________________</p>
+                                </div>
+                            </div>
+
+                            <div className="text-center space-y-12">
+                                <div className="border-b border-dashed border-slate-400 w-48 mx-auto"></div>
+                                <div>
+                                    <p className="font-bold text-slate-800">Tandatangan Ibu Bapa / Penjaga</p>
+                                    <p className="text-slate-400 text-[10px]">Nama: _______________________</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function SettingsTab({ schoolInfo, setSchoolInfo, topics, setTopics, students, setStudents, showToast }) {
+            const [newCode, setNewCode] = useState("");
+            const [newTitle, setNewTitle] = useState("");
+
+            // Logo upload handler
+            const handleLogoUpload = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    if (file.size > 2 * 1024 * 1024) {
+                        showToast("Saiz gambar logo mestilah kurang daripada 2MB", "error");
+                        return;
+                    }
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        setSchoolInfo(prev => ({ ...prev, logo: reader.result }));
+                        showToast("Logo sekolah berjaya dimuat naik!");
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            // DSKP Topic Management
+            const handleAddTopic = (e) => {
+                e.preventDefault();
+                if (!newCode.trim() || !newTitle.trim()) return;
+
+                const newTopicObj = {
+                    id: "top_" + Date.now(),
+                    code: newCode.trim(),
+                    title: newTitle.trim()
+                };
+
+                setTopics(prev => [...prev, newTopicObj]);
+                setNewCode("");
+                setNewTitle("");
+                showToast("Topik DSKP baharu berjaya ditambah!");
+            };
+
+            const handleDeleteTopic = (topicId) => {
+                if (window.confirm("Adakah anda pasti mahu memadam topik ini? Semua rekod markah topik ini juga akan dipadam.")) {
+                    setTopics(prev => prev.filter(t => t.id !== topicId));
+                    showToast("Topik DSKP telah dipadam.");
+                }
+            };
+
+            // Backup Data to JSON File
+            const handleExportBackup = () => {
+                const dataObj = {
+                    schoolInfo,
+                    topics,
+                    students,
+                    exportedAt: new Date().toISOString()
+                };
+
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dataObj, null, 2));
+                const downloadAnchor = document.createElement('a');
+                downloadAnchor.setAttribute("href", dataStr);
+                downloadAnchor.setAttribute("download", `backup_pbd_${new Date().toISOString().slice(0,10)}.json`);
+                document.body.appendChild(downloadAnchor);
+                downloadAnchor.click();
+                downloadAnchor.remove();
+
+                showToast("Fail simpanan backup_pbd.json berjaya dimuat turun!");
+            };
+
+            // Restore Data from JSON File
+            const handleImportBackup = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        try {
+                            const parsed = JSON.parse(event.target.result);
+                            if (parsed.schoolInfo && parsed.topics && parsed.students) {
+                                setSchoolInfo(parsed.schoolInfo);
+                                setTopics(parsed.topics);
+                                setStudents(parsed.students);
+                                showToast("Data berjaya dipulihkan (restored)!");
+                            } else {
+                                showToast("Format fail JSON tidak sah!", "error");
+                            }
+                        } catch (err) {
+                            showToast("Gagal membaca fail JSON!", "error");
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            };
+
+            // Reset to factory defaults
+            const handleResetDefault = () => {
+                if (window.confirm("Adakah anda pasti mahu mengembalikan data awal sistem? Semua rekod sedia ada akan digantikan.")) {
+                    setSchoolInfo(INITIAL_SCHOOL_INFO);
+                    setTopics(INITIAL_TOPICS);
+                    setStudents(INITIAL_STUDENTS);
+                    localStorage.clear();
+                    showToast("Sistem telah di-reset ke data asal.");
+                }
+            };
+
+            return (
+                <div className="space-y-8 animate-fade-in pb-12">
+                    {/* School & Subject Info Section */}
+                    <div className="glass-card p-6 rounded-2xl">
+                        <h3 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+                            <Icon name="school" className="w-5 h-5 text-indigo-600" /> Tetapan Maklumat Sekolah & Subjek
+                        </h3>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Nama Sekolah</label>
+                                    <input
+                                        type="text"
+                                        value={schoolInfo.schoolName}
+                                        onChange={(e) => setSchoolInfo(prev => ({ ...prev, schoolName: e.target.value }))}
+                                        className="w-full px-4 py-2.5 text-sm rounded-xl glass-input text-slate-800 font-semibold"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Nama Subjek / Bidang Pembelajaran</label>
+                                    <input
+                                        type="text"
+                                        value={schoolInfo.subject}
+                                        onChange={(e) => setSchoolInfo(prev => ({ ...prev, subject: e.target.value }))}
+                                        className="w-full px-4 py-2.5 text-sm rounded-xl glass-input text-slate-800 font-semibold"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Nama Kelas / Tingkatan</label>
+                                    <input
+                                        type="text"
+                                        value={schoolInfo.className}
+                                        onChange={(e) => setSchoolInfo(prev => ({ ...prev, className: e.target.value }))}
+                                        className="w-full px-4 py-2.5 text-sm rounded-xl glass-input text-slate-800 font-semibold"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Logo Upload Box */}
+                            <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-300 rounded-2xl bg-white/40">
+                                {schoolInfo.logo ? (
+                                    <div className="text-center space-y-3">
+                                        <img src={schoolInfo.logo} alt="Logo Sekolah" className="w-24 h-24 object-contain mx-auto rounded-xl shadow-md" />
+                                        <button
+                                            onClick={() => setSchoolInfo(prev => ({ ...prev, logo: '' }))}
+                                            className="text-xs text-red-600 font-bold hover:underline"
+                                        >
+                                            Padam Logo
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="text-center space-y-3">
+                                        <div className="w-16 h-16 rounded-full bg-indigo-50 text-indigo-500 flex items-center justify-center mx-auto">
+                                            <Icon name="upload" className="w-8 h-8" />
+                                        </div>
+                                        <div>
+                                            <p className="text-xs font-bold text-slate-700">Muat Naik Logo Sekolah</p>
+                                            <p className="text-[10px] text-slate-400">Format PNG/JPG (Maks 2MB)</p>
+                                        </div>
+                                        <label className="inline-block px-4 py-2 text-xs font-bold text-white bg-indigo-600 rounded-xl cursor-pointer hover:bg-indigo-700 shadow">
+                                            <span>Pilih Fail</span>
+                                            <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                                        </label>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* DSKP Topics CRUD Section */}
+                    <div className="glass-card p-6 rounded-2xl">
+                        <h3 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+                            <Icon name="table" className="w-5 h-5 text-indigo-600" /> Pengurusan Topik DSKP
+                        </h3>
+
+                        {/* Add Topic Form */}
+                        <form onSubmit={handleAddTopic} className="grid grid-cols-1 md:grid-cols-12 gap-3 mb-6 bg-indigo-50/50 p-4 rounded-xl border border-indigo-100">
+                            <div className="md:col-span-3">
+                                <label className="block text-[10px] font-bold text-indigo-900 uppercase mb-1">Kod Topik / SK</label>
+                                <input
+                                    type="text"
+                                    placeholder="Contoh: KF 1.1.6"
+                                    value={newCode}
+                                    onChange={(e) => setNewCode(e.target.value)}
+                                    className="w-full px-3 py-2 text-xs rounded-lg glass-input font-bold"
+                                />
+                            </div>
+                            <div className="md:col-span-7">
+                                <label className="block text-[10px] font-bold text-indigo-900 uppercase mb-1">Tajuk / Standard Pembelajaran</label>
+                                <input
+                                    type="text"
+                                    placeholder="Contoh: Menyusun objek mengikut saiz"
+                                    value={newTitle}
+                                    onChange={(e) => setNewTitle(e.target.value)}
+                                    className="w-full px-3 py-2 text-xs rounded-lg glass-input font-semibold"
+                                />
+                            </div>
+                            <div className="md:col-span-2 flex items-end">
+                                <button
+                                    type="submit"
+                                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow"
+                                >
+                                    <Icon name="plus" className="w-4 h-4" />
+                                    <span>Tambah</span>
+                                </button>
+                            </div>
+                        </form>
+
+                        {/* Topic List Table */}
+                        <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden bg-white/60">
+                            {topics.map((topic, idx) => (
+                                <div key={topic.id} className="p-3.5 flex items-center justify-between hover:bg-slate-50">
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-xs font-extrabold text-slate-400 w-6">{idx + 1}.</span>
+                                        <div>
+                                            <span className="text-xs font-extrabold text-indigo-600 mr-2">{topic.code}</span>
+                                            <span className="text-xs font-semibold text-slate-800">{topic.title}</span>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => handleDeleteTopic(topic.id)}
+                                        className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50"
+                                        title="Padam Topik"
+                                    >
+                                        <Icon name="trash" className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Data Backup & Restore Section */}
+                    <div className="glass-card p-6 rounded-2xl">
+                        <h3 className="text-base font-bold text-slate-800 mb-2 flex items-center gap-2">
+                            <Icon name="download" className="w-5 h-5 text-indigo-600" /> Backup & Restore Data (JSON)
+                        </h3>
+                        <p className="text-xs text-slate-500 mb-6">Muat turun salinan data untuk simpanan selamat atau pindah ke komputer lain.</p>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <button
+                                onClick={handleExportBackup}
+                                className="flex items-center justify-center gap-2 p-4 text-xs font-bold text-slate-800 bg-white hover:bg-slate-50 border border-slate-300 rounded-2xl shadow-sm transition-all"
+                            >
+                                <Icon name="download" className="w-5 h-5 text-indigo-600" />
+                                <span>Muat Turun Backup JSON</span>
+                            </button>
+
+                            <label className="flex items-center justify-center gap-2 p-4 text-xs font-bold text-slate-800 bg-white hover:bg-slate-50 border border-slate-300 rounded-2xl shadow-sm cursor-pointer transition-all">
+                                <Icon name="upload" className="w-5 h-5 text-emerald-600" />
+                                <span>Muat Naik / Restore JSON</span>
+                                <input type="file" accept=".json" onChange={handleImportBackup} className="hidden" />
+                            </label>
+
+                            <button
+                                onClick={handleResetDefault}
+                                className="flex items-center justify-center gap-2 p-4 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-2xl shadow-sm transition-all"
+                            >
+                                <Icon name="trash" className="w-5 h-5 text-red-600" />
+                                <span>Reset Data Default</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        window.onload = function() {
+            const rootElement = document.getElementById('root');
+            const root = ReactDOM.createRoot(rootElement);
+            root.render(<App />);
+        };
+    </script>
+</body>
+</html>
